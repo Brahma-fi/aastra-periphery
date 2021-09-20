@@ -1,11 +1,19 @@
 {
   "name": "hardhat-project",
+  "scripts": {
+    "deployKovan": "npx hardhat run scripts/deploy.js --network kovan"
+  },
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.0.2",
+    "@nomiclabs/hardhat-etherscan": "^2.1.6",
     "@nomiclabs/hardhat-waffle": "^2.0.1",
+    "@openzeppelin/contracts": "^3.4.1",
+    "@uniswap/v3-periphery": "^1.2.0",
     "chai": "^4.3.4",
     "ethereum-waffle": "^3.4.0",
     "ethers": "^5.4.7",
-    "hardhat": "^2.6.4"
+    "hardhat": "^2.6.4",
+    "hardhat-contract-sizer": "^2.1.1",
+    "solidity-coverage": "^0.7.17"
   }
 }
