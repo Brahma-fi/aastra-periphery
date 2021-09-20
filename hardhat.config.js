@@ -17,8 +17,7 @@ module.exports = {
   networks: {
     hardhat: {
       forking: {
-        url: `https://eth-kovan.alchemyapi.io/v2/${secrets.alchemyAPIKey}`,
-        blockNumber: 27276736
+        url: `https://eth-kovan.alchemyapi.io/v2/${secrets.alchemyAPIKey}`
       }
     },
     kovan: {

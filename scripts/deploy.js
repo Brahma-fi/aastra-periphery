@@ -2,7 +2,7 @@ const hre = require("hardhat");
 
 const etherscan_verify = true;
 
-const FACTORY_ADDRESS = "0x0A56DC9611DE2C1BB3747FA04FbfA8A72988A034";
+const FACTORY_ADDRESS = "0x5fE99C34146C8edE7BCEB7bd6a15E0aAA81a591e";
 
 function timeout(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

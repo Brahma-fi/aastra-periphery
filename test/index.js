@@ -3,8 +3,8 @@ const { checkEqual, checkBelow, checkAbove } = require("./helper");
 
 const { ethers } = hre;
 
-const FACTORY_ADDRESS = "0x0A56DC9611DE2C1BB3747FA04FbfA8A72988A034";
-const STRATEGY_MANAGER_ADDRESS = "0x0405d9d1443DFB051D5e8E231e41C911Dc8393a4";
+const FACTORY_ADDRESS = "0x5fE99C34146C8edE7BCEB7bd6a15E0aAA81a591e";
+const STRATEGY_MANAGER_ADDRESS = "0x140713bbD82113e104C3a45661134F9764807922";
 const IMPERSONATION_ACCOUNT = "0xE177DdEa55d5A724515AF1D909a36543cBC4d93E";
 
 let factoryInstance;
@@ -18,6 +18,7 @@ const getContract = async () => {
   const vaultAddress = await factoryInstance.managerVault(
     STRATEGY_MANAGER_ADDRESS
   );
+
   vaultInstance = await ethers.getContractAt("IVault", vaultAddress);
 
   signer = await ethers.getSigner(IMPERSONATION_ACCOUNT);
