@@ -200,6 +200,15 @@ contract Periphery is IPeriphery {
         }
     }
 
+    /**
+      * @notice Swap tokens based on direction
+      * @param direction direction to perform swap in
+      * @param token0 token0 address
+      * @param token1 token1 address
+      * @param fee pool fee
+      * @param amountIn amount to be swapped
+      * @param amountOutMinimum Minimum output amount required
+     */
     function _swapTokens(
         bool direction,
         address token0,
