@@ -5,6 +5,7 @@ pragma abicoder v2;
 import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "@uniswap/v3-periphery/contracts/libraries/TransferHelper.sol";
 import "@uniswap/v3-periphery/contracts/interfaces/IQuoter.sol";
+import "@uniswap/v3-core/contracts/interfaces/IUniswapV3Pool.sol";
 import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
@@ -32,16 +33,19 @@ contract Periphery is IPeriphery {
     } 
 
     /// @inheritdoc IPeriphery
-    function vaultDeposit(uint256 amountIn, uint256 slippage, address strategy) 
+    function vaultDeposit(uint256 amount0In, uint256 amount1In, uint256 slippage, address strategy) 
     external override minimumAmount(amountIn) {
         require(slippage <= 100*100, "100% slippage is not allowed");
 
-        (IVault vault, uint24 poolFee, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
+        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
 
         // Calculate amount to swap based on tokens in vault
         // token0 / token1 = k
         // token0 + token1 = amountIn
-        uint256 amountToSwap = _calculateAmountToSwap(vault, amountIn);
+        uint256 factor = 10 **
+            (uint256(18).sub(token1.decimals()).add(token0.decimals()));
+
+        (uint256 amountToSwap, bool direction) = _calculateAmountToSwap(vault, pool, factor amount0In, amount1In);
         
         // transfer token0 from sender to contract & approve router to spend it
         token0.safeTransferFrom(msg.sender, address(this), amountIn);
@@ -51,7 +55,7 @@ contract Periphery is IPeriphery {
         uint256 amountOutQuoted = quoter.quoteExactInputSingle(
             address(token0), 
             address(token1), 
-            poolFee, 
+            pool.fee(), 
             amountToSwap, 
             0
         );
@@ -135,6 +139,8 @@ contract Periphery is IPeriphery {
         require(vaultAddress != address(0x0), "Not a valid strategy");
 
         IVault vault = IVault(vaultAddress);
+        IUniswapV3Pool pool  = vault.pool();
+
         uint24 poolFee = vault.pool().fee();
         IERC20Metadata token0 = vault.token0();
         IERC20Metadata token1 = vault.token1();
@@ -148,19 +154,29 @@ contract Periphery is IPeriphery {
       * @param amountIn minimum amount in
       * @return amount to swap
      */
-    function _calculateAmountToSwap(IVault vault, uint256 amountIn) internal view returns (uint256) {
+    function _calculateAmountToSwap(IVault vault, IUniswapV3Pool pool, uint256 factor, uint256 amount0In, uint256 amount1In) internal view returns (uint256 amountToSwap, bool isToken0Excess) {
         (uint256 token0InVault, uint256 token1InVault) = vault.getTotalAmounts();
         
         if(token0InVault == 0 || token1InVault == 0) {
-            return amountIn/2;
-        } 
+            isToken0Excess = token0InVault==0;
+            amountToSwap = isToken0Excess? amount0: amount1;
+        }
+        else {
+        uint256 ratio = token1InVault.mulDiv(factor, token0InVault);
+        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+        uint256 price = uint256(sqrtPriceX96).mul(uint256(sqrtPriceX96)).mul(
+            factor
+        ) >> (96 * 2);
 
-        return
-            (amountIn.mul(100) - 
-            amountIn.mul(100*100).div(token1InVault.mul(100).div(token0InVault)
-            .add(1*100))
-            ).div(100);
-    }
+        uint256 token0Converted = ratio.mulDiv(amount0, factor);
+        isToken0Excess = amount1 < token0Converted;
+
+        uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1).mulDiv(factor, ratio) : amount1.sub(token0Converted);
+        amountToSwap = isToken0Excess
+            ? excessAmount.mulDiv(ratio, price.add(ratio))
+            : excessAmount.mulDiv(price, price.add(ratio));
+        }
+}
 
     /**
       * @notice send remaining balances of tokens to user
