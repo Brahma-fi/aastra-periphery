@@ -46,7 +46,7 @@ const depositToVault = async (token, amount) => {
   await token.connect(signer).approve(peripheryInstance.address, amount);
   await peripheryInstance
     .connect(signer)
-    .vaultDeposit(amount, 500, STRATEGY_MANAGER_ADDRESS);
+    .vaultDeposit(amount, 0, 500, STRATEGY_MANAGER_ADDRESS);
 };
 
 const withdrawFromVault = async (shares) => {
@@ -55,7 +55,7 @@ const withdrawFromVault = async (shares) => {
     .approve(peripheryInstance.address, shares);
   await peripheryInstance
     .connect(signer)
-    .vaultWithdraw(shares, STRATEGY_MANAGER_ADDRESS);
+    .vaultWithdraw(shares, STRATEGY_MANAGER_ADDRESS, false);
 };
 
 describe("UniswapPutPeriphery Tests", function () {

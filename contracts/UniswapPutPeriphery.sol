@@ -34,85 +34,85 @@ contract Periphery is IPeriphery {
 
     /// @inheritdoc IPeriphery
     function vaultDeposit(uint256 amount0In, uint256 amount1In, uint256 slippage, address strategy) 
-    external override minimumAmount(amountIn) {
+    external override {
         require(slippage <= 100*100, "100% slippage is not allowed");
 
         (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
 
         // Calculate amount to swap based on tokens in vault
         // token0 / token1 = k
-        // token0 + token1 = amountIn
+        // token0 + token1 * price = amountIn
         uint256 factor = 10 **
             (uint256(18).sub(token1.decimals()).add(token0.decimals()));
 
-        (uint256 amountToSwap, bool direction) = _calculateAmountToSwap(vault, pool, factor amount0In, amount1In);
+        (uint256 amountToSwap, bool direction) = _calculateAmountToSwap(vault, pool, factor, amount0In, amount1In);
         
         // transfer token0 from sender to contract & approve router to spend it
-        token0.safeTransferFrom(msg.sender, address(this), amountIn);
-        token0.approve(address(swapRouter), amountToSwap);
+        IERC20Metadata(direction ? token0 : token1)
+            .safeTransferFrom(msg.sender, address(this), direction ? amount0In : amount1In);
 
         // swap token0 for token1
-        uint256 amountOutQuoted = quoter.quoteExactInputSingle(
-            address(token0), 
-            address(token1), 
-            pool.fee(), 
-            amountToSwap, 
-            0
-        );
+        if(amountToSwap > 0) {
+            uint256 amountOutQuotedWithSlippage = quoter.quoteExactInputSingle(
+                address(direction ? token0 : token1), 
+                address(direction ? token1 : token0), 
+                pool.fee(), 
+                amountToSwap, 
+                0
+            ).mul(100*100 - slippage).div(100*100);
 
-        ISwapRouter.ExactInputSingleParams memory params =
-            ISwapRouter.ExactInputSingleParams({
-                tokenIn: address(token0),
-                tokenOut: address(token1),
-                fee: poolFee,
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountIn: amountToSwap,
-                amountOutMinimum: amountOutQuoted.mul(100*100 - slippage).div(100*100),
-                sqrtPriceLimitX96: 0
-            });
-        uint256 amountOut = swapRouter.exactInputSingle(params);
+            _swapTokens(
+                direction, 
+                address(token0), 
+                address(token1), 
+                pool.fee(), 
+                amountToSwap, 
+                amountOutQuotedWithSlippage 
+            );
+        }
 
         // deposit token0 & token1 in vault
-        token0.approve(address(vault), _tokenBalance(token0));
-        token1.approve(address(vault), amountOut);
+        if(_tokenBalance(token0) > 0) {
+            token0.approve(address(vault), _tokenBalance(token0));
+        }
+        if(_tokenBalance(token1) > 0) {
+            token1.approve(address(vault), _tokenBalance(token1));
+        }
 
-        vault.deposit(_tokenBalance(token0), amountOut, 0, 0, msg.sender);
+        vault.deposit(
+            _tokenBalance(direction ? token0 : token1), 
+            _tokenBalance(direction? token1 : token0), 
+            0, 
+            0, 
+            msg.sender
+        );
 
         // send balance of token1 & token0 to user
         _sendBalancesToUser(token0, token1, msg.sender);
     }
 
     /// @inheritdoc IPeriphery
-    function vaultWithdraw(uint256 shares, address strategy) external override minimumAmount(shares) {
-        (IVault vault, uint24 poolFee, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
+    function vaultWithdraw(uint256 shares, address strategy, bool direction) 
+    external override minimumAmount(shares) {
+        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
 
         // transfer shares from msg.sender & withdraw
         vault.safeTransferFrom(msg.sender, address(this), shares);
         (uint256 amount0, uint256 amount1) = vault.withdraw(shares, 0, 0, address(this));
-
-        token1.approve(address(swapRouter), amount1);
+        uint256 amountToSwap = direction ? amount0 : amount1;
 
         // swap token0 for token1
-        ISwapRouter.ExactInputSingleParams memory params =
-            ISwapRouter.ExactInputSingleParams({
-                tokenIn: address(token1),
-                tokenOut: address(token0),
-                fee: poolFee,
-                recipient: address(this),
-                deadline: block.timestamp,
-                amountIn: amount1,
-                amountOutMinimum: quoter.quoteExactInputSingle(
-                    address(token1), 
-                    address(token0), 
-                    poolFee, 
-                    amount1, 
-                    0
-                ),
-                sqrtPriceLimitX96: 0
-            });
-        swapRouter.exactInputSingle(params);
-
+        if(amountToSwap > 0) {
+            _swapTokens(
+                direction, 
+                address(token0), 
+                address(token1), 
+                pool.fee(), 
+                amountToSwap, 
+                0
+            );
+        }
+ 
         // send balance of token1 & token0 to user
         _sendBalancesToUser(token0, token1, msg.sender);
     }
@@ -132,7 +132,7 @@ contract Periphery is IPeriphery {
       * @return vault, poolFee, token0, token1
      */
     function _getVault(address strategy) internal view 
-        returns (IVault, uint24, IERC20Metadata, IERC20Metadata) 
+        returns (IVault, IUniswapV3Pool, IERC20Metadata, IERC20Metadata) 
     {
         address vaultAddress = factory.managerVault(strategy);
         
@@ -141,40 +141,43 @@ contract Periphery is IPeriphery {
         IVault vault = IVault(vaultAddress);
         IUniswapV3Pool pool  = vault.pool();
 
-        uint24 poolFee = vault.pool().fee();
         IERC20Metadata token0 = vault.token0();
         IERC20Metadata token1 = vault.token1();
 
-        return (vault, poolFee, token0, token1);
+        return (vault, pool, token0, token1);
     }
 
     /**
       * @notice Get the amount to swap befor deposit
       * @param vault vault to get token balances from
-      * @param amountIn minimum amount in
-      * @return amount to swap
+      * @param pool UniswapV3 pool
+      * @param factor Constant factor to adjust decimals
+      * @param amount0In minimum amount0 in
+      * @param amount1In minimum amount1 in
+      * @return amountToSwap amount to swap
+      * @return isToken0Excess direction of swap
      */
     function _calculateAmountToSwap(IVault vault, IUniswapV3Pool pool, uint256 factor, uint256 amount0In, uint256 amount1In) internal view returns (uint256 amountToSwap, bool isToken0Excess) {
         (uint256 token0InVault, uint256 token1InVault) = vault.getTotalAmounts();
         
         if(token0InVault == 0 || token1InVault == 0) {
             isToken0Excess = token0InVault==0;
-            amountToSwap = isToken0Excess? amount0: amount1;
+            amountToSwap = isToken0Excess? amount0In: amount1In;
         }
         else {
-        uint256 ratio = token1InVault.mulDiv(factor, token0InVault);
+        uint256 ratio = token1InVault.mul(factor).div(token0InVault);
         (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
         uint256 price = uint256(sqrtPriceX96).mul(uint256(sqrtPriceX96)).mul(
             factor
         ) >> (96 * 2);
 
-        uint256 token0Converted = ratio.mulDiv(amount0, factor);
-        isToken0Excess = amount1 < token0Converted;
+        uint256 token0Converted = ratio.mul(amount0In).div(factor);
+        isToken0Excess = amount1In < token0Converted;
 
-        uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1).mulDiv(factor, ratio) : amount1.sub(token0Converted);
+        uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1In).mul(factor).div(ratio) : amount1In.sub(token0Converted);
         amountToSwap = isToken0Excess
-            ? excessAmount.mulDiv(ratio, price.add(ratio))
-            : excessAmount.mulDiv(price, price.add(ratio));
+            ? excessAmount.mul(ratio).div(price.add(ratio))
+            : excessAmount.mul(price).div(price.add(ratio));
         }
 }
 
@@ -195,6 +198,30 @@ contract Periphery is IPeriphery {
         if(_tokenBalance(token1) > 0) {
             token1.safeTransfer(recipient, _tokenBalance(token1));
         }
+    }
+
+    function _swapTokens(
+        bool direction,
+        address token0,
+        address token1,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 amountOutMinimum
+    ) internal {
+        IERC20Metadata(direction ? token0 : token1).approve(address(swapRouter), amountIn);
+
+        ISwapRouter.ExactInputSingleParams memory params =
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: direction ? token0 : token1,
+                tokenOut:  direction ? token1 : token0,
+                fee: fee,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            });
+        swapRouter.exactInputSingle(params);
     }
 
     modifier minimumAmount(uint256 amountIn) {
