@@ -23,6 +23,10 @@ module.exports = {
     kovan: {
       url: `https://eth-kovan.alchemyapi.io/v2/${secrets.alchemyAPIKey}`,
       accounts: [`0x${secrets.privateKey}`]
+    },
+    customRPC: {
+      url: "https://rpc.tenderly.co/fork/09375c58-4bf6-437f-8ace-9622a963722b",
+      accounts: [`0x${secrets.privateKey}`]
     }
   },
   etherscan: { apiKey: secrets.etherscanKey }
