@@ -165,21 +165,21 @@ contract Periphery is IPeriphery {
             amountToSwap = isToken0Excess? amount0In: amount1In;
         }
         else {
-        uint256 ratio = token1InVault.mul(factor).div(token0InVault);
-        (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
-        uint256 price = uint256(sqrtPriceX96).mul(uint256(sqrtPriceX96)).mul(
-            factor
-        ) >> (96 * 2);
+            uint256 ratio = token1InVault.mul(factor).div(token0InVault);
+            (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
+            uint256 price = uint256(sqrtPriceX96).mul(uint256(sqrtPriceX96)).mul(
+                factor
+            ) >> (96 * 2);
 
-        uint256 token0Converted = ratio.mul(amount0In).div(factor);
-        isToken0Excess = amount1In < token0Converted;
+            uint256 token0Converted = ratio.mul(amount0In).div(factor);
+            isToken0Excess = amount1In < token0Converted;
 
-        uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1In).mul(factor).div(ratio) : amount1In.sub(token0Converted);
-        amountToSwap = isToken0Excess
-            ? excessAmount.mul(ratio).div(price.add(ratio))
-            : excessAmount.mul(price).div(price.add(ratio));
+            uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1In).mul(factor).div(ratio) : amount1In.sub(token0Converted);
+            amountToSwap = isToken0Excess
+                ? excessAmount.mul(ratio).div(price.add(ratio))
+                : excessAmount.mul(price).div(price.add(ratio));
         }
-}
+    }
 
     /**
       * @notice send remaining balances of tokens to user
