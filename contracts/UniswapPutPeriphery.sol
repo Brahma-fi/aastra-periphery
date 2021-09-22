@@ -81,7 +81,7 @@ contract Periphery is IPeriphery {
 
         vault.deposit(
             _tokenBalance(direction ? token0 : token1), 
-            _tokenBalance(direction? token1 : token0), 
+            _tokenBalance(direction ? token1 : token0), 
             0, 
             0, 
             msg.sender
@@ -162,6 +162,7 @@ contract Periphery is IPeriphery {
 
         if(token0InVault == 0 && token1InVault == 0) {
             amountToSwap = 0;
+            isToken0Excess = amount1In == 0 ? true : false;
         } else if(token0InVault == 0 || token1InVault == 0) {
             isToken0Excess = token0InVault==0;
             amountToSwap = isToken0Excess ? amount0In : amount1In;
