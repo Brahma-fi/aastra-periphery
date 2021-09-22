@@ -46,7 +46,7 @@ const depositToVault = async (token, amount) => {
   await token.connect(signer).approve(peripheryInstance.address, amount);
   await peripheryInstance
     .connect(signer)
-    .vaultDeposit(amount, 0, 500, STRATEGY_MANAGER_ADDRESS);
+    .vaultDeposit(amount,"0x379c28627e0d2b219e69511fd4cb6cfa5db6d3f1" , 500, STRATEGY_MANAGER_ADDRESS);
 };
 
 const withdrawFromVault = async (shares) => {

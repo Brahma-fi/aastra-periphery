@@ -33,23 +33,26 @@ contract Periphery is IPeriphery {
     } 
 
     /// @inheritdoc IPeriphery
-    function vaultDeposit(uint256 amount0In, uint256 amount1In, uint256 slippage, address strategy) 
+    function vaultDeposit(uint256 amount, address token, uint256 slippage, address strategy) 
     external override {
         require(slippage <= 100*100, "100% slippage is not allowed");
 
         (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(strategy);
 
+        require(token==address(token0) || token==address(token1), "token should be in pool");
+        bool direction =  token==address(token0);
         // Calculate amount to swap based on tokens in vault
         // token0 / token1 = k
         // token0 + token1 * price = amountIn
         uint256 factor = 10 **
             (uint256(18).sub(token1.decimals()).add(token0.decimals()));
 
-        (uint256 amountToSwap, bool direction) = _calculateAmountToSwap(vault, pool, factor, amount0In, amount1In);
+        uint256 amountToSwap = _calculateAmountToSwap(vault, pool, factor, amount, direction);
         
-        // transfer token0 from sender to contract & approve router to spend it
-        IERC20Metadata(direction ? token0 : token1)
-            .safeTransferFrom(msg.sender, address(this), direction ? amount0In : amount1In);
+
+        // transfer token from sender to contract & approve router to spend it
+        IERC20Metadata(token)
+            .safeTransferFrom(msg.sender, address(this), amount);
 
         // swap token0 for token1
         if(amountToSwap > 0) {
@@ -152,20 +155,18 @@ contract Periphery is IPeriphery {
       * @param vault vault to get token balances from
       * @param pool UniswapV3 pool
       * @param factor Constant factor to adjust decimals
-      * @param amount0In minimum amount0 in
-      * @param amount1In minimum amount1 in
+      * @param amount amount to swap
+      * @param direction bool for token being supplied.
       * @return amountToSwap amount to swap
-      * @return isToken0Excess direction of swap
      */
-    function _calculateAmountToSwap(IVault vault, IUniswapV3Pool pool, uint256 factor, uint256 amount0In, uint256 amount1In) internal view returns (uint256 amountToSwap, bool isToken0Excess) {
+    function _calculateAmountToSwap(IVault vault, IUniswapV3Pool pool, uint256 factor, uint256 amount, bool direction) internal view returns (uint256 amountToSwap) {
         (uint256 token0InVault, uint256 token1InVault) = vault.getTotalAmounts();
 
         if(token0InVault == 0 && token1InVault == 0) {
             amountToSwap = 0;
-            isToken0Excess = amount1In == 0 ? true : false;
-        } else if(token0InVault == 0 || token1InVault == 0) {
-            isToken0Excess = token0InVault==0;
-            amountToSwap = isToken0Excess ? amount0In : amount1In;
+        } else if (token0InVault == 0 || token1InVault == 0) {
+            bool isTokenZeroInVault = token0InVault==0;
+            amountToSwap= (direction == isTokenZeroInVault) ? amount : 0;
         } else {
             uint256 ratio = token1InVault.mul(factor).div(token0InVault);
             (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
@@ -173,13 +174,9 @@ contract Periphery is IPeriphery {
                 factor
             ) >> (96 * 2);
 
-            uint256 token0Converted = ratio.mul(amount0In).div(factor);
-            isToken0Excess = amount1In < token0Converted;
-
-            uint256 excessAmount = isToken0Excess ? token0Converted.sub(amount1In).mul(factor).div(ratio) : amount1In.sub(token0Converted);
-            amountToSwap = isToken0Excess
-                ? excessAmount.mul(ratio).div(price.add(ratio))
-                : excessAmount.mul(price).div(price.add(ratio));
+            amountToSwap = direction
+                ? amount.mul(ratio).div(price.add(ratio))
+                : amount.mul(price).div(price.add(ratio));
         }
     }
 
