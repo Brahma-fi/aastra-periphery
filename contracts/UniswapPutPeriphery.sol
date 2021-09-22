@@ -159,12 +159,13 @@ contract Periphery is IPeriphery {
      */
     function _calculateAmountToSwap(IVault vault, IUniswapV3Pool pool, uint256 factor, uint256 amount0In, uint256 amount1In) internal view returns (uint256 amountToSwap, bool isToken0Excess) {
         (uint256 token0InVault, uint256 token1InVault) = vault.getTotalAmounts();
-        
-        if(token0InVault == 0 || token1InVault == 0) {
+
+        if(token0InVault == 0 && token1InVault == 0) {
+            amountToSwap = 0;
+        } else if(token0InVault == 0 || token1InVault == 0) {
             isToken0Excess = token0InVault==0;
-            amountToSwap = isToken0Excess? amount0In: amount1In;
-        }
-        else {
+            amountToSwap = isToken0Excess ? amount0In : amount1In;
+        } else {
             uint256 ratio = token1InVault.mul(factor).div(token0InVault);
             (uint160 sqrtPriceX96, , , , , , ) = pool.slot0();
             uint256 price = uint256(sqrtPriceX96).mul(uint256(sqrtPriceX96)).mul(
