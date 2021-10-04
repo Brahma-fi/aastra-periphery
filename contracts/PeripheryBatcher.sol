@@ -56,23 +56,23 @@ contract PeripheryBacther {
     }
 
     function batchDepositPeriphery(address vaultAddress, uint usersToDeposit) public {
-        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
+        (IVault vault, , , ) = _getVault(vaultAddress);
 
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
 
         if (lastDepositedIndex[vaultAddress] == 0) {
-            token.approve(address(periphery), type(uint256).MAX_VALUE);
+            token.approve(address(periphery), type(uint256).max);
         }
 
-        UserLedgers[] memory userLedgers = userLedgers[vaultAddress];
+        UserLedger[] storage userLedgerArray = userLedgers[vaultAddress];
         uint length = usersToDeposit + lastDepositedIndex[vaultAddress];
-        if (length > userLedgers.length) {
-            length = userLedgers.length;
+        if (length > userLedgerArray.length) {
+            length = userLedgerArray.length;
         }
         uint amount;
 
-        for (int i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgers[i];
+        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
+            UserLedger storage user = userLedgerArray[i];
             if (user.status == false) {
                 amount+= user.amount;
                 user.status = true;
@@ -85,8 +85,8 @@ contract PeripheryBacther {
 
         uint lpTokensReceived = vault.balanceOf(address(this)) - oldLPBalance;
 
-        for (int i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgers[i];
+        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
+            UserLedger storage user = userLedgerArray[i];
             uint tokensToSend = (user.amount * lpTokensReceived / amount);
             vault.transfer(user.user, tokensToSend);
         }
