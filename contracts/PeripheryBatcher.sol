@@ -10,6 +10,7 @@ import "./interfaces/IFactory.sol";
 import "./interfaces/IPeriphery.sol";
 import "./interfaces/IVault.sol";
 
+import "hardhat/console.sol";
 
 contract PeripheryBacther {
 
@@ -18,88 +19,69 @@ contract PeripheryBacther {
 
     IFactory public factory;
     IPeriphery public periphery;
-    mapping(address => UserLedger[]) public userLedgers;
-    mapping(address => uint) public strategyUserCount;
-    mapping(address => uint) public totalAmountIn;
-    mapping(address => uint) public lastDepositedIndex;
+
+
     mapping(address => address) public tokenAddress;
 
-    struct UserLedger {
-        uint amount;
-        bool status;
-        address user;
-        address token;
-    }
+    mapping(address => mapping(address => uint)) userLedger;
+    // vault addr -> user addr -> amount to be deposited
+
+    event Deposit (address indexed sender, address indexed vault, uint amountIn);
+
 
     constructor(IFactory _factory, IPeriphery _periphery) public {
         factory = _factory;
         periphery = _periphery;
     } 
 
-    function depositFunds(uint amountIn, address vaultAddress, address token) public{
-        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
-
+    function depositFunds(uint amountIn, address vaultAddress) public{
         require(tokenAddress[vaultAddress] != address(0), 'Invalid tokenAddress');
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amountIn);
+        require(IERC20(tokenAddress[vaultAddress]).allowance(msg.sender, address(this)) >= amountIn, 'No allowance');
 
-        UserLedger memory user = UserLedger({
-            amount: amountIn,
-            status: false,
-            user: msg.sender,
-            token: token    
-        });
+        IERC20(tokenAddress[vaultAddress]).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        userLedgers[vaultAddress][strategyUserCount[vaultAddress]] = user;
-        strategyUserCount[vaultAddress]++;
-        totalAmountIn[vaultAddress] += amountIn;
+        userLedger[vaultAddress][msg.sender] += amountIn;
+
+        emit Deposit(msg.sender, vaultAddress, amountIn);
     }
 
-    function batchDepositPeriphery(address vaultAddress, uint usersToDeposit) public {
-        (IVault vault, , , ) = _getVault(vaultAddress);
+    function batchDepositPeriphery(address vaultAddress, address[] memory users) public {
+
+        IERC20 vault = IERC20(vaultAddress);
 
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
 
-        if (lastDepositedIndex[vaultAddress] == 0) {
-            token.approve(address(periphery), type(uint256).max);
+        uint amountToDeposit = 0;
+
+        for (uint i=0; i< users.length; i++) {
+            amountToDeposit += userLedger[vaultAddress][users[i]];
         }
 
-        UserLedger[] storage userLedgerArray = userLedgers[vaultAddress];
-        uint length = usersToDeposit + lastDepositedIndex[vaultAddress];
-        if (length > userLedgerArray.length) {
-            length = userLedgerArray.length;
-        }
-        uint amount;
-
-        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgerArray[i];
-            if (user.status == false) {
-                amount+= user.amount;
-                user.status = true;
-            }
-        }
+        require(amountToDeposit > 0, 'no deposits to make');
 
         uint oldLPBalance = vault.balanceOf(address(this));
         
-        periphery.vaultDeposit(amount, address(token), 500, factory.vaultManager(vaultAddress));
+        periphery.vaultDeposit(amountToDeposit, address(token), 500, factory.vaultManager(vaultAddress));
 
         uint lpTokensReceived = vault.balanceOf(address(this)) - oldLPBalance;
 
-        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgerArray[i];
-            uint tokensToSend = (user.amount * lpTokensReceived / amount);
-            vault.transfer(user.user, tokensToSend);
+        for (uint i=0; i< users.length; i++) {
+            uint userAmount = userLedger[vaultAddress][users[i]];
+            uint userShare = userAmount * lpTokensReceived / amountToDeposit;
+            userLedger[vaultAddress][users[i]] = 0;
+            vault.transfer(users[i], userShare);
         }
 
-        lastDepositedIndex[vaultAddress] = length;
-        totalAmountIn[vaultAddress] -= amount;
     }
 
     /// TODO implement onlyOwner from openzeppelin
-    function setStrategyTokenAddress(address vaultAddress, address token) public {
-        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
+    function setVaultTokenAddress(address vaultAddress, address token) public {
+        (, , IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
         require(address(token0) == token || address(token1) == token, 'wrong token address');
         tokenAddress[vaultAddress] = token;
+
+        IERC20(token).approve(address(periphery), type(uint256).max);
     }
 
     /**
