@@ -18,10 +18,20 @@ contract PeripheryBacther {
 
     IFactory public factory;
     IPeriphery public periphery;
+    // mapping should be used other way round
+    /*
+    struct UserLedger {
+        address user;
+        address token;
+        address vault;
+    }
+    mappibg (UserLedger[] => uint) public balances;
+    */
     mapping(address => UserLedger[]) public userLedgers;
     mapping(address => uint) public strategyUserCount;
     mapping(address => uint) public totalAmountIn;
     mapping(address => uint) public lastDepositedIndex;
+    // this mapping can be ignored if either token index or address is passed during deposit
     mapping(address => address) public tokenAddress;
 
     struct UserLedger {
@@ -59,7 +69,7 @@ contract PeripheryBacther {
         (IVault vault, , , ) = _getVault(vaultAddress);
 
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
-
+        // check the allowance before approve
         if (lastDepositedIndex[vaultAddress] == 0) {
             token.approve(address(periphery), type(uint256).max);
         }
@@ -84,9 +94,10 @@ contract PeripheryBacther {
         periphery.vaultDeposit(amount, address(token), 500, factory.vaultManager(vaultAddress));
 
         uint lpTokensReceived = vault.balanceOf(address(this)) - oldLPBalance;
-
+        // storage not required here memory can be used as values aren't being modified.
         for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
             UserLedger storage user = userLedgerArray[i];
+            // use safemath here.
             uint tokensToSend = (user.amount * lpTokensReceived / amount);
             vault.transfer(user.user, tokensToSend);
         }
