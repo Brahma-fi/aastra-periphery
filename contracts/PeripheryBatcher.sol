@@ -3,6 +3,7 @@ pragma solidity >=0.7.5;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "./interfaces/IERC20Metadata.sol";
@@ -12,7 +13,7 @@ import "./interfaces/IVault.sol";
 
 import "hardhat/console.sol";
 
-contract PeripheryBacther {
+contract PeripheryBacther is Ownable {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -46,7 +47,7 @@ contract PeripheryBacther {
         emit Deposit(msg.sender, vaultAddress, amountIn);
     }
 
-    function batchDepositPeriphery(address vaultAddress, address[] memory users) public {
+    function batchDepositPeriphery(address vaultAddress, address[] memory users) public onlyOwner {
 
         IERC20 vault = IERC20(vaultAddress);
 
@@ -75,8 +76,7 @@ contract PeripheryBacther {
 
     }
 
-    /// TODO implement onlyOwner from openzeppelin
-    function setVaultTokenAddress(address vaultAddress, address token) public {
+    function setVaultTokenAddress(address vaultAddress, address token) public onlyOwner {
         (, , IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
         require(address(token0) == token || address(token1) == token, 'wrong token address');
         tokenAddress[vaultAddress] = token;
