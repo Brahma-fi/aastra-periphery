@@ -87,7 +87,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
         for (uint i=0; i< users.length; i++) {
             uint userAmount = userLedger[vaultAddress][users[i]];
-            uint userShare = userAmount * lpTokensReceived / amountToDeposit;
+            uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
             userLedger[vaultAddress][users[i]] = 0;
             vault.transfer(users[i], userShare);
         }

@@ -14,6 +14,14 @@ interface IPeripheryBatcher {
     * @param vaultAddress address of vault to deposit into
     */
   function depositFunds(uint amountIn, address vaultAddress) external;
+
+  /**
+    * @notice Stores the deposits for future batching via periphery
+    * @param amountOut Value of token to be deposited 
+    * @param vaultAddress address of vault to deposit into
+    */
+  function withdrawFunds(uint amountOut, address vaultAddress) external;
+
   /**
     * @notice Performs deposits on the periphery for the supplied users in batch
     * @param vaultAddress address of vault to deposit inton
