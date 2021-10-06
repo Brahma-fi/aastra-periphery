@@ -9,11 +9,12 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "./interfaces/IERC20Metadata.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPeriphery.sol";
+import "./interfaces/IPeripheryBatcher.sol";
 import "./interfaces/IVault.sol";
 
 import "hardhat/console.sol";
 
-contract PeripheryBacther is Ownable {
+contract PeripheryBacther is Ownable, IPeripheryBatcher {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -30,12 +31,12 @@ contract PeripheryBacther is Ownable {
     event Deposit (address indexed sender, address indexed vault, uint amountIn);
 
 
-    constructor(IFactory _factory, IPeriphery _periphery) public {
+    constructor(IFactory _factory, IPeriphery _periphery) {
         factory = _factory;
         periphery = _periphery;
     } 
 
-    function depositFunds(uint amountIn, address vaultAddress) public{
+    function depositFunds(uint amountIn, address vaultAddress) external override {
         require(tokenAddress[vaultAddress] != address(0), 'Invalid tokenAddress');
 
         require(IERC20(tokenAddress[vaultAddress]).allowance(msg.sender, address(this)) >= amountIn, 'No allowance');
@@ -47,7 +48,7 @@ contract PeripheryBacther is Ownable {
         emit Deposit(msg.sender, vaultAddress, amountIn);
     }
 
-    function batchDepositPeriphery(address vaultAddress, address[] memory users) public onlyOwner {
+    function batchDepositPeriphery(address vaultAddress, address[] memory users) external override onlyOwner {
 
         IERC20 vault = IERC20(vaultAddress);
 
@@ -76,7 +77,7 @@ contract PeripheryBacther is Ownable {
 
     }
 
-    function setVaultTokenAddress(address vaultAddress, address token) public onlyOwner {
+    function setVaultTokenAddress(address vaultAddress, address token) external override onlyOwner {
         (, , IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
         require(address(token0) == token || address(token1) == token, 'wrong token address');
         tokenAddress[vaultAddress] = token;
