@@ -29,6 +29,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
     // vault addr -> user addr -> amount to be deposited
 
     event Deposit (address indexed sender, address indexed vault, uint amountIn);
+    event Withdraw (address indexed sender, address indexed vault, uint amountOut);
 
 
     constructor(IFactory _factory, IPeriphery _periphery) {
@@ -44,9 +45,23 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
         IERC20(tokenAddress[vaultAddress]).safeTransferFrom(msg.sender, address(this), amountIn);
 
-        userLedger[vaultAddress][msg.sender] += amountIn;
+        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].add(amountIn);
 
         emit Deposit(msg.sender, vaultAddress, amountIn);
+    }
+
+
+    function withdrawFunds(uint amountOut, address vaultAddress) external override {
+        require(tokenAddress[vaultAddress] != address(0), 'Invalid vault address');
+
+        require(userLedger[vaultAddress][msg.sender] >= amountOut, 'No funds available');
+
+        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].sub(amountOut);
+
+        IERC20(tokenAddress[vaultAddress]).safeTransfer(msg.sender, amountOut);
+
+        emit Withdraw(msg.sender, vaultAddress, amountOut);
+
     }
 
     /// @inheritdoc IPeripheryBatcher
@@ -59,7 +74,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         uint amountToDeposit = 0;
 
         for (uint i=0; i< users.length; i++) {
-            amountToDeposit += userLedger[vaultAddress][users[i]];
+            amountToDeposit = amountToDeposit.add(userLedger[vaultAddress][users[i]]);
         }
 
         require(amountToDeposit > 0, 'no deposits to make');
@@ -68,7 +83,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         
         periphery.vaultDeposit(amountToDeposit, address(token), 500, factory.vaultManager(vaultAddress));
 
-        uint lpTokensReceived = vault.balanceOf(address(this)) - oldLPBalance;
+        uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
 
         for (uint i=0; i< users.length; i++) {
             uint userAmount = userLedger[vaultAddress][users[i]];
