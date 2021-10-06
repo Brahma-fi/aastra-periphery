@@ -16,13 +16,10 @@ function timeout(ms) {
 
 async function main() {
   const accounts = await hre.ethers.getSigners();
-  // console.log(accounts[0]);
-  const signer = accounts[0];
   console.log(
     "current acc balance",
     (await hre.ethers.provider.getBalance(accounts[0].address)).toString()
   );
-  // return
 
   const Periphery = await hre.ethers.getContractFactory("Periphery");
   const periphery = await Periphery.deploy(FACTORY_ADDRESS);

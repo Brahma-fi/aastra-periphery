@@ -14,7 +14,7 @@ import "./interfaces/IVault.sol";
 
 import "hardhat/console.sol";
 
-contract PeripheryBacther is Ownable, IPeripheryBatcher {
+contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -36,8 +36,9 @@ contract PeripheryBacther is Ownable, IPeripheryBatcher {
         periphery = _periphery;
     } 
 
+    /// @inheritdoc IPeripheryBatcher
     function depositFunds(uint amountIn, address vaultAddress) external override {
-        require(tokenAddress[vaultAddress] != address(0), 'Invalid tokenAddress');
+        require(tokenAddress[vaultAddress] != address(0), 'Invalid vault address');
 
         require(IERC20(tokenAddress[vaultAddress]).allowance(msg.sender, address(this)) >= amountIn, 'No allowance');
 
@@ -48,6 +49,7 @@ contract PeripheryBacther is Ownable, IPeripheryBatcher {
         emit Deposit(msg.sender, vaultAddress, amountIn);
     }
 
+    /// @inheritdoc IPeripheryBatcher
     function batchDepositPeriphery(address vaultAddress, address[] memory users) external override onlyOwner {
 
         IERC20 vault = IERC20(vaultAddress);
@@ -77,6 +79,7 @@ contract PeripheryBacther is Ownable, IPeripheryBatcher {
 
     }
 
+    /// @inheritdoc IPeripheryBatcher
     function setVaultTokenAddress(address vaultAddress, address token) external override onlyOwner {
         (, , IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
         require(address(token0) == token || address(token1) == token, 'wrong token address');
