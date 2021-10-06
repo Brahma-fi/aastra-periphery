@@ -26,8 +26,9 @@ interface IPeripheryBatcher {
     * @notice Performs deposits on the periphery for the supplied users in batch
     * @param vaultAddress address of vault to deposit inton
     * @param users array of users whose deposits must be resolved
+    * @param slippage percentage of slippage to be applied to the batch deposit's swap
     */
-  function batchDepositPeriphery(address vaultAddress, address[] memory users) external;
+  function batchDepositPeriphery(address vaultAddress, address[] memory users, uint slippage) external;
   /**
     * @notice To set a token address as the deposit token for a vault
     * @param vaultAddress address of vault to deposit inton

@@ -65,7 +65,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
     }
 
     /// @inheritdoc IPeripheryBatcher
-    function batchDepositPeriphery(address vaultAddress, address[] memory users) external override onlyOwner {
+    function batchDepositPeriphery(address vaultAddress, address[] memory users, uint slippage) external override onlyOwner {
 
         IERC20 vault = IERC20(vaultAddress);
 
@@ -81,15 +81,17 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
         uint oldLPBalance = vault.balanceOf(address(this));
         
-        periphery.vaultDeposit(amountToDeposit, address(token), 500, factory.vaultManager(vaultAddress));
+        periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
 
         uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
 
         for (uint i=0; i< users.length; i++) {
             uint userAmount = userLedger[vaultAddress][users[i]];
-            uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
-            userLedger[vaultAddress][users[i]] = 0;
-            vault.transfer(users[i], userShare);
+            if (userAmount > 0) {
+                uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
+                userLedger[vaultAddress][users[i]] = 0;
+                vault.transfer(users[i], userShare);
+            }
         }
 
     }
