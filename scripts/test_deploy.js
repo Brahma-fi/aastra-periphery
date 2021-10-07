@@ -28,7 +28,7 @@ async function main() {
 
   console.log("Periphery deployed to:", periphery.address);
 
-  const Batcher = await hre.ethers.getContractFactory("PeripheryBacther");
+  const Batcher = await hre.ethers.getContractFactory("PeripheryBatcher");
   const batcher = await Batcher.deploy(FACTORY_ADDRESS, periphery.address);
 
   await batcher.deployed();
@@ -94,22 +94,22 @@ async function main() {
 
   console.log("approved token for spend");
 
-  await batcher.depositFunds(balance / 10, VAULT_ADDRESS);
+  await batcher.depositFunds(balance.div(10) , VAULT_ADDRESS);
   console.log(
     "USDC balance",
     (await USDC.balanceOf(accounts[0].address)).toString()
   );
-  await batcher.depositFunds(balance / 10, VAULT_ADDRESS);
+  await batcher.depositFunds(balance.div(10), VAULT_ADDRESS);
   console.log(
     "USDC balance",
     (await USDC.balanceOf(accounts[0].address)).toString()
   );
-  await batcher.depositFunds(balance / 10, VAULT_ADDRESS);
+  await batcher.depositFunds(balance.div(10), VAULT_ADDRESS);
   console.log(
     "USDC balance",
     (await USDC.balanceOf(accounts[0].address)).toString()
   );
-  await batcher.depositFunds(balance / 10, VAULT_ADDRESS);
+  await batcher.depositFunds(balance.div(10),  VAULT_ADDRESS);
   console.log(
     "USDC balance",
     (await USDC.balanceOf(accounts[0].address)).toString()
@@ -122,9 +122,8 @@ async function main() {
 
   await batcher.batchDepositPeriphery(VAULT_ADDRESS, [
     accounts[0].address,
-    accounts[1].address,
-    accounts[2].address
-  ]);
+    "0x140713bbD82113e104C3a45661134F9764807922",
+  ], 500);
 
   console.log(
     "LP tokens after batch deposit",
