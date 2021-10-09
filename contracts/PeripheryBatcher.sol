@@ -25,7 +25,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
     mapping(address => address) public tokenAddress;
 
-    mapping(address => mapping(address => uint)) userLedger;
+    mapping(address => mapping(address => uint)) public userLedger;
     // vault addr -> user addr -> amount to be deposited
 
     event Deposit (address indexed sender, address indexed vault, uint amountIn);
@@ -80,8 +80,12 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         require(amountToDeposit > 0, 'no deposits to make');
 
         uint oldLPBalance = vault.balanceOf(address(this));
+
+        uint stableCoinBalanceOld = token.balanceOf(address(this));
         
         periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
+
+        uint stableCoinBalanceUnused = token.balanceOf(address(this)) - stableCoinBalanceOld;
 
         uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
 
@@ -89,7 +93,7 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
             uint userAmount = userLedger[vaultAddress][users[i]];
             if (userAmount > 0) {
                 uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
-                userLedger[vaultAddress][users[i]] = 0;
+                userLedger[vaultAddress][users[i]] =  stableCoinBalanceUnused.mul(userLedger[vaultAddress][users[i]]).div(amountToDeposit);
                 vault.transfer(users[i], userShare);
             }
         }
