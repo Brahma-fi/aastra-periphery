@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/math/SafeMath.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./interfaces/IERC20Metadata.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPeriphery.sol";
@@ -14,13 +15,15 @@ import "./interfaces/IVault.sol";
 
 import "hardhat/console.sol";
 
-contract PeripheryBatcher is Ownable, IPeripheryBatcher {
+contract PeripheryBatcher is IPeripheryBatcher {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
     IFactory public factory;
     IPeriphery public periphery;
+
+    ISwapRouter public immutable swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
 
 
     mapping(address => address) public tokenAddress;
@@ -36,6 +39,15 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         factory = _factory;
         periphery = _periphery;
     } 
+
+    function owner() public view returns (address) {
+        return factory.governance();
+    }
+
+    modifier onlyOwner {
+        require(msg.sender == owner());
+        _;
+    }
 
     /// @inheritdoc IPeripheryBatcher
     function depositFunds(uint amountIn, address vaultAddress) external override {
@@ -67,25 +79,61 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
     /// @inheritdoc IPeripheryBatcher
     function batchDepositPeriphery(address vaultAddress, address[] memory users, uint slippage) external override onlyOwner {
 
-        IERC20 vault = IERC20(vaultAddress);
+        IVault vault = IVault(vaultAddress);
 
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
 
         uint amountToDeposit = 0;
 
-        for (uint i=0; i< users.length; i++) {
-            amountToDeposit = amountToDeposit.add(userLedger[vaultAddress][users[i]]);
+        {
+            for (uint i=0; i< users.length; i++) {
+                amountToDeposit = amountToDeposit.add(userLedger[vaultAddress][users[i]]);
+            }
         }
 
         require(amountToDeposit > 0, 'no deposits to make');
 
         uint oldLPBalance = vault.balanceOf(address(this));
 
-        uint stableCoinBalanceOld = token.balanceOf(address(this));
-        
-        periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
+        uint tokenLeft = 0;
 
-        uint stableCoinBalanceUnused = token.balanceOf(address(this)) - stableCoinBalanceOld;
+        {
+
+            uint token0BalanceOld = vault.token0().balanceOf(address(this));
+            uint token1BalanceOld = vault.token1().balanceOf(address(this));
+            
+            periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
+
+            uint token0BalanceNew = vault.token0().balanceOf(address(this));
+            uint token1BalanceNew = vault.token1().balanceOf(address(this));
+
+            uint token0BalUnused = token0BalanceNew.sub(token0BalanceOld);
+            uint token1BalUnused = token1BalanceNew.sub(token1BalanceOld);
+
+            
+            IERC20 otherToken = token == vault.token0() ? vault.token1() : vault.token0();
+
+            if (otherToken == vault.token0() && token0BalUnused > 0) {
+                _swapTokens(address(vault.token0()), address(vault.token1()), vault.pool().fee(), token0BalUnused, 0);
+                
+                uint swapOut = vault.token1().balanceOf(address(this)).sub(token1BalanceNew);
+
+                tokenLeft = token1BalUnused.add(swapOut);
+
+            } else if (otherToken == vault.token1() && token1BalUnused > 0) {
+                _swapTokens(address(vault.token1()), address(vault.token0()), vault.pool().fee(), token1BalUnused, 0);
+                
+                uint swapOut = vault.token0().balanceOf(address(this)).sub(token0BalanceNew);
+
+                tokenLeft = token0BalUnused.add(swapOut);
+            }
+        }
+
+
+        // if (token1BalUnused > 0) {
+        //     token0Unused = true;
+        // }
+        
 
         uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
 
@@ -93,8 +141,16 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
             uint userAmount = userLedger[vaultAddress][users[i]];
             if (userAmount > 0) {
                 uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
-                userLedger[vaultAddress][users[i]] =  stableCoinBalanceUnused.mul(userLedger[vaultAddress][users[i]]).div(amountToDeposit);
                 vault.transfer(users[i], userShare);
+
+                uint tokenLeftShare = userAmount.mul(tokenLeft).div(amountToDeposit);
+                if (tokenLeftShare > 0)
+                token.transfer(users[i], tokenLeftShare);
+
+                // uint token0OwedBack = token0BalUnused.mul(userAmount).div(amountToDeposit);
+                // uint token1OwedBack = token1BalUnused.mul(userAmount).div(amountToDeposit);
+                // userLedger[vaultAddress][users[i]] =  tokenLeft.mul(userAmount).div(amountToDeposit);
+                
             }
         }
 
@@ -136,6 +192,30 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         IERC20Metadata token1 = vault.token1();
 
         return (vault, pool, token0, token1);
+    }
+
+
+    function _swapTokens(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 amountOutMinimum
+    ) internal {
+        IERC20Metadata(tokenIn).approve(address(swapRouter), amountIn);
+
+        ISwapRouter.ExactInputSingleParams memory params =
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: tokenIn,
+                tokenOut:  tokenOut,
+                fee: fee,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            });
+        swapRouter.exactInputSingle(params);
     }
 
 }
