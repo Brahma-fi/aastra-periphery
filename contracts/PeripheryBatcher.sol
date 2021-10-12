@@ -15,7 +15,7 @@ import "./interfaces/IVault.sol";
 
 import "hardhat/console.sol";
 
-contract PeripheryBatcher is IPeripheryBatcher {
+contract PeripheryBatcher is Ownable, IPeripheryBatcher {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
@@ -40,12 +40,12 @@ contract PeripheryBatcher is IPeripheryBatcher {
         periphery = _periphery;
     } 
 
-    function owner() public view returns (address) {
+    function governance() public view returns (address) {
         return factory.governance();
     }
 
-    modifier onlyOwner {
-        require(msg.sender == owner());
+    modifier onlyGovernance {
+        require(msg.sender == governance(), 'Protocol governance only');
         _;
     }
 
@@ -68,9 +68,9 @@ contract PeripheryBatcher is IPeripheryBatcher {
 
         require(userLedger[vaultAddress][msg.sender] >= amountOut, 'No funds available');
 
-        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].sub(amountOut);
-
         IERC20(tokenAddress[vaultAddress]).safeTransfer(msg.sender, amountOut);
+
+        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].sub(amountOut);
 
         emit Withdraw(msg.sender, vaultAddress, amountOut);
 
@@ -95,44 +95,19 @@ contract PeripheryBatcher is IPeripheryBatcher {
 
         uint oldLPBalance = vault.balanceOf(address(this));
 
-        uint tokenLeft = 0;
 
-        {
-
-            uint token0BalanceOld = vault.token0().balanceOf(address(this));
-            uint token1BalanceOld = vault.token1().balanceOf(address(this));
-            
-            periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
-
-            uint token0BalanceNew = vault.token0().balanceOf(address(this));
-            uint token1BalanceNew = vault.token1().balanceOf(address(this));
-
-            uint token0BalUnused = token0BalanceNew.sub(token0BalanceOld);
-            uint token1BalUnused = token1BalanceNew.sub(token1BalanceOld);
-
-            
-            IERC20 otherToken = token == vault.token0() ? vault.token1() : vault.token0();
-
-            if (otherToken == vault.token0() && token0BalUnused > 0) {
-                _swapTokens(address(vault.token0()), address(vault.token1()), vault.pool().fee(), token0BalUnused, 0);
-                
-                uint swapOut = vault.token1().balanceOf(address(this)).sub(token1BalanceNew);
-
-                tokenLeft = token1BalUnused.add(swapOut);
-
-            } else if (otherToken == vault.token1() && token1BalUnused > 0) {
-                _swapTokens(address(vault.token1()), address(vault.token0()), vault.pool().fee(), token1BalUnused, 0);
-                
-                uint swapOut = vault.token0().balanceOf(address(this)).sub(token0BalanceNew);
-
-                tokenLeft = token0BalUnused.add(swapOut);
-            }
+        uint oldTokenBalance = token.balanceOf(address(this));
+        periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
+        IERC20 otherToken = token == vault.token0() ? vault.token1() : vault.token0();
+        uint otherTokenBalance = otherToken.balanceOf(address(this));
+        if (otherTokenBalance > 0) {
+            _swapTokens(address(otherToken), address(token), vault.pool().fee(), otherTokenBalance, 0);
         }
 
+        uint newTokenBalance = token.balanceOf(address(this));
+        uint tokenLeft = amountToDeposit.add(newTokenBalance).sub(oldTokenBalance);
 
-        // if (token1BalUnused > 0) {
-        //     token0Unused = true;
-        // }
+
         
 
         uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
@@ -141,16 +116,14 @@ contract PeripheryBatcher is IPeripheryBatcher {
             uint userAmount = userLedger[vaultAddress][users[i]];
             if (userAmount > 0) {
                 uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
-                vault.transfer(users[i], userShare);
+                IERC20(address(vault)).safeTransfer(users[i], userShare);
 
                 uint tokenLeftShare = userAmount.mul(tokenLeft).div(amountToDeposit);
-                if (tokenLeftShare > 0)
-                token.transfer(users[i], tokenLeftShare);
-
-                // uint token0OwedBack = token0BalUnused.mul(userAmount).div(amountToDeposit);
-                // uint token1OwedBack = token1BalUnused.mul(userAmount).div(amountToDeposit);
-                // userLedger[vaultAddress][users[i]] =  tokenLeft.mul(userAmount).div(amountToDeposit);
+                if (tokenLeftShare > 0){
+                    token.safeTransfer(users[i], tokenLeftShare);
                 
+                }
+                userLedger[vaultAddress][users[i]] = 0;
             }
         }
 
@@ -216,6 +189,10 @@ contract PeripheryBatcher is IPeripheryBatcher {
                 sqrtPriceLimitX96: 0
             });
         swapRouter.exactInputSingle(params);
+    }
+
+    function emergencyWithdraw(address token, uint amount, address recipient) public onlyGovernance{
+        IERC20(token).safeTransfer(recipient, amount);
     }
 
 }
