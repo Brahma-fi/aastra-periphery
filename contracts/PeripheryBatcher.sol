@@ -3,114 +3,135 @@ pragma solidity >=0.7.5;
 pragma abicoder v2;
 
 import "@openzeppelin/contracts/math/SafeMath.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 import "./interfaces/IERC20Metadata.sol";
 import "./interfaces/IFactory.sol";
 import "./interfaces/IPeriphery.sol";
+import "./interfaces/IPeripheryBatcher.sol";
 import "./interfaces/IVault.sol";
 
+import "hardhat/console.sol";
 
-contract PeripheryBacther {
+contract PeripheryBatcher is IPeripheryBatcher {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
 
     IFactory public factory;
     IPeriphery public periphery;
-    // mapping should be used other way round
-    /*
-    struct UserLedger {
-        address user;
-        address token;
-        address vault;
-    }
-    mappibg (UserLedger[] => uint) public balances;
-    */
-    mapping(address => UserLedger[]) public userLedgers;
-    mapping(address => uint) public strategyUserCount;
-    mapping(address => uint) public totalAmountIn;
-    mapping(address => uint) public lastDepositedIndex;
-    // this mapping can be ignored if either token index or address is passed during deposit
+    address owner;
+
+    ISwapRouter public immutable swapRouter = ISwapRouter(0xE592427A0AEce92De3Edee1F18E0157C05861564);
+
+
     mapping(address => address) public tokenAddress;
 
-    struct UserLedger {
-        uint amount;
-        bool status;
-        address user;
-        address token;
-    }
+    mapping(address => mapping(address => uint)) public userLedger;
+    // vault addr -> user addr -> amount to be deposited
 
-    constructor(IFactory _factory, IPeriphery _periphery) public {
+    event Deposit (address indexed sender, address indexed vault, uint amountIn);
+    event Withdraw (address indexed sender, address indexed vault, uint amountOut);
+
+
+    constructor(IFactory _factory, IPeriphery _periphery) {
         factory = _factory;
         periphery = _periphery;
     } 
 
-    function depositFunds(uint amountIn, address vaultAddress, address token) public{
-        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
 
-        require(tokenAddress[vaultAddress] != address(0), 'Invalid tokenAddress');
-
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amountIn);
-
-        UserLedger memory user = UserLedger({
-            amount: amountIn,
-            status: false,
-            user: msg.sender,
-            token: token    
-        });
-
-        userLedgers[vaultAddress][strategyUserCount[vaultAddress]] = user;
-        strategyUserCount[vaultAddress]++;
-        totalAmountIn[vaultAddress] += amountIn;
+    modifier onlyOwner {
+        require(msg.sender == owner);
+        _;
     }
 
-    function batchDepositPeriphery(address vaultAddress, uint usersToDeposit) public {
-        (IVault vault, , , ) = _getVault(vaultAddress);
+    modifier onlyGovernance {
+        require(msg.sender == factory.governance());
+        _;
+    }
+
+    /// @inheritdoc IPeripheryBatcher
+    function depositFunds(uint amountIn, address vaultAddress) external override {
+        require(tokenAddress[vaultAddress] != address(0), 'Invalid vault address');
+
+        require(IERC20(tokenAddress[vaultAddress]).allowance(msg.sender, address(this)) >= amountIn, 'No allowance');
+
+        IERC20(tokenAddress[vaultAddress]).safeTransferFrom(msg.sender, address(this), amountIn);
+
+        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].add(amountIn);
+
+        emit Deposit(msg.sender, vaultAddress, amountIn);
+    }
+
+
+    function withdrawFunds(uint amountOut, address vaultAddress) external override {
+        require(tokenAddress[vaultAddress] != address(0), 'Invalid vault address');
+
+        require(userLedger[vaultAddress][msg.sender] >= amountOut, 'No funds available');
+
+        userLedger[vaultAddress][msg.sender] = userLedger[vaultAddress][msg.sender].sub(amountOut);
+
+        IERC20(tokenAddress[vaultAddress]).safeTransfer(msg.sender, amountOut);
+
+        emit Withdraw(msg.sender, vaultAddress, amountOut);
+
+    }
+
+    /// @inheritdoc IPeripheryBatcher
+    function batchDepositPeriphery(address vaultAddress, address[] memory users, uint slippage) external override onlyOwner {
+
+        IVault vault = IVault(vaultAddress);
 
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
-        // check the allowance before approve
-        if (lastDepositedIndex[vaultAddress] == 0) {
-            token.approve(address(periphery), type(uint256).max);
-        }
 
-        UserLedger[] storage userLedgerArray = userLedgers[vaultAddress];
-        uint length = usersToDeposit + lastDepositedIndex[vaultAddress];
-        if (length > userLedgerArray.length) {
-            length = userLedgerArray.length;
-        }
-        uint amount;
+        uint amountToDeposit = 0;
 
-        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgerArray[i];
-            if (user.status == false) {
-                amount+= user.amount;
-                user.status = true;
+        // does having it in scope update its value.
+        {
+            for (uint i=0; i< users.length; i++) {
+                amountToDeposit = amountToDeposit.add(userLedger[vaultAddress][users[i]]);
             }
         }
 
-        uint oldLPBalance = vault.balanceOf(address(this));
-        
-        periphery.vaultDeposit(amount, address(token), 500, factory.vaultManager(vaultAddress));
+        require(amountToDeposit > 0, 'no deposits to make');
 
-        uint lpTokensReceived = vault.balanceOf(address(this)) - oldLPBalance;
-        // storage not required here memory can be used as values aren't being modified.
-        for (uint i = lastDepositedIndex[vaultAddress]; i < length; i++) {
-            UserLedger storage user = userLedgerArray[i];
-            // use safemath here.
-            uint tokensToSend = (user.amount * lpTokensReceived / amount);
-            vault.transfer(user.user, tokensToSend);
+        uint oldLPBalance = vault.balanceOf(address(this));
+
+
+        periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
+        IERC20 otherToken = token == vault.token0() ? vault.token1() : vault.token0();
+        uint otherTokenBalance = other.balanceOf(address(this));
+        if (otherTokenBalance > 0) {
+            _swapTokens(address(otherToken), address(token), vault.pool().fee(), otherTokenBalance, 0);
         }
 
-        lastDepositedIndex[vaultAddress] = length;
-        totalAmountIn[vaultAddress] -= amount;
+        uint tokenLeft = token.balanceOf(address(this));
+        uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
+
+        for (uint i=0; i< users.length; i++) {
+            uint userAmount = userLedger[vaultAddress][users[i]];
+            if (userAmount > 0) {
+                uint userShare = userAmount.mul(lpTokensReceived).div(amountToDeposit);
+                vault.transfer(users[i], userShare);
+
+                uint tokenLeftShare = userAmount.mul(tokenLeft).div(amountToDeposit);
+                if (tokenLeftShare > 0)
+                token.transfer(users[i], tokenLeftShare);
+                userLedger[vaultAddress][users[i]] = 0;
+            }
+        }
+
     }
 
-    /// TODO implement onlyOwner from openzeppelin
-    function setStrategyTokenAddress(address vaultAddress, address token) public {
-        (IVault vault, IUniswapV3Pool pool, IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
+    /// @inheritdoc IPeripheryBatcher
+    function setVaultTokenAddress(address vaultAddress, address token) external override onlyOwner {
+        (, , IERC20Metadata token0, IERC20Metadata token1) = _getVault(vaultAddress);
         require(address(token0) == token || address(token1) == token, 'wrong token address');
         tokenAddress[vaultAddress] = token;
+
+        IERC20(token).approve(address(periphery), type(uint256).max);
     }
 
     /**
@@ -140,6 +161,30 @@ contract PeripheryBacther {
         IERC20Metadata token1 = vault.token1();
 
         return (vault, pool, token0, token1);
+    }
+
+
+    function _swapTokens(
+        address tokenIn,
+        address tokenOut,
+        uint24 fee,
+        uint256 amountIn,
+        uint256 amountOutMinimum
+    ) internal {
+        IERC20Metadata(tokenIn).approve(address(swapRouter), amountIn);
+
+        ISwapRouter.ExactInputSingleParams memory params =
+            ISwapRouter.ExactInputSingleParams({
+                tokenIn: tokenIn,
+                tokenOut:  tokenOut,
+                fee: fee,
+                recipient: address(this),
+                deadline: block.timestamp,
+                amountIn: amountIn,
+                amountOutMinimum: amountOutMinimum,
+                sqrtPriceLimitX96: 0
+            });
+        swapRouter.exactInputSingle(params);
     }
 
 }
