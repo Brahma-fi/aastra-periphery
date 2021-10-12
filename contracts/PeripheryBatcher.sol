@@ -98,7 +98,7 @@ contract PeripheryBatcher is IPeripheryBatcher {
         require(amountToDeposit > 0, 'no deposits to make');
 
         uint oldLPBalance = vault.balanceOf(address(this));
-
+        uint oldTokenBalance = token.balanceOf(address(this));
 
         periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
         IERC20 otherToken = token == vault.token0() ? vault.token1() : vault.token0();
@@ -107,7 +107,9 @@ contract PeripheryBatcher is IPeripheryBatcher {
             _swapTokens(address(otherToken), address(token), vault.pool().fee(), otherTokenBalance, 0);
         }
 
-        uint tokenLeft = token.balanceOf(address(this));
+        uint newTokenBalance = token.balanceOf(address(this));
+        uint tokenLeft = amountToDeposit.add(newTokenBalance).sub(oldTokenBalance);
+
         uint lpTokensReceived = vault.balanceOf(address(this)).sub(oldLPBalance);
 
         for (uint i=0; i< users.length; i++) {
@@ -117,8 +119,9 @@ contract PeripheryBatcher is IPeripheryBatcher {
                 vault.transfer(users[i], userShare);
 
                 uint tokenLeftShare = userAmount.mul(tokenLeft).div(amountToDeposit);
-                if (tokenLeftShare > 0)
-                token.transfer(users[i], tokenLeftShare);
+                if (tokenLeftShare > 0){
+                    token.transfer(users[i], tokenLeftShare);
+                }
                 userLedger[vaultAddress][users[i]] = 0;
             }
         }
