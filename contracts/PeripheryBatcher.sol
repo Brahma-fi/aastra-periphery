@@ -84,17 +84,15 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         IERC20 token = IERC20(tokenAddress[vaultAddress]);
 
         uint amountToDeposit = 0;
-
+        uint tokenLeft = 0;
+        uint oldLPBalance = vault.balanceOf(address(this));
+        
         {
             for (uint i=0; i< users.length; i++) {
                 amountToDeposit = amountToDeposit.add(userLedger[vaultAddress][users[i]]);
             }
-        }
 
         require(amountToDeposit > 0, 'no deposits to make');
-
-        uint oldLPBalance = vault.balanceOf(address(this));
-
 
         uint oldTokenBalance = token.balanceOf(address(this));
         periphery.vaultDeposit(amountToDeposit, address(token), slippage, factory.vaultManager(vaultAddress));
@@ -105,7 +103,8 @@ contract PeripheryBatcher is Ownable, IPeripheryBatcher {
         }
 
         uint newTokenBalance = token.balanceOf(address(this));
-        uint tokenLeft = amountToDeposit.add(newTokenBalance).sub(oldTokenBalance);
+        tokenLeft = amountToDeposit.add(newTokenBalance).sub(oldTokenBalance);
+        }
 
 
         
